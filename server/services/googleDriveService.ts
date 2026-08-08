@@ -1,0 +1,152 @@
+import fs from "fs";
+import path from "path";
+import sharp from "sharp";
+import { google, type drive_v3 } from "googleapis";
+
+import driveAuth from "../config/drive.js";
+
+class GoogleDriveService {
+  private getFolderId(): string {
+    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+    if (!folderId) {
+      throw new Error("GOOGLE_DRIVE_FOLDER_ID is not defined");
+    }
+    return folderId;
+  }
+
+  async getDrive(): Promise<drive_v3.Drive> {
+    this.getFolderId();
+
+    const auth = await driveAuth;
+
+    return google.drive({
+      version: "v3",
+      auth,
+    });
+  }
+
+  async optimizeImage(inputPath: string): Promise<string> {
+    const outputPath = path.join(
+      path.dirname(inputPath),
+      `compressed-${path.basename(inputPath, path.extname(inputPath))}.webp`,
+    );
+
+    await sharp(inputPath)
+      .rotate()
+      .resize({
+        width: 1200,
+        withoutEnlargement: true,
+      })
+      .webp({
+        quality: 80,
+        effort: 6,
+      })
+      .toFile(outputPath);
+
+    return outputPath;
+  }
+
+  async uploadFile(
+    localPath: string,
+    fileName: string,
+  ): Promise<{
+    fileId: string;
+    url: string;
+  }> {
+    const folderId = this.getFolderId();
+
+    const optimizedPath = await this.optimizeImage(localPath);
+    const drive = await this.getDrive();
+
+    try {
+      const response = await drive.files.create({
+        requestBody: {
+          name: `${fileName}.webp`,
+          parents: [folderId],
+        },
+
+        media: {
+          mimeType: "image/webp",
+          body: fs.createReadStream(optimizedPath),
+        },
+
+        fields: "id",
+      });
+
+      const fileId = response.data.id;
+
+      if (!fileId) {
+        throw new Error("Google Drive did not return a file ID");
+      }
+
+      await drive.permissions.create({
+        fileId,
+        requestBody: {
+          role: "reader",
+          type: "anyone",
+        },
+      });
+
+      return {
+        fileId,
+        url: `https://drive.google.com/thumbnail?id=${fileId}&sz=w1000`,
+      };
+    } finally {
+      try {
+        if (fs.existsSync(localPath)) {
+          await fs.promises.unlink(localPath);
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+
+        console.error("Failed to delete original file:", message);
+      }
+
+      try {
+        if (fs.existsSync(optimizedPath)) {
+          await fs.promises.unlink(optimizedPath);
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+
+        console.error("Failed to delete optimized file:", message);
+      }
+    }
+  }
+
+  async deleteFile(fileId?: string): Promise<void> {
+    if (!fileId) {
+      return;
+    }
+
+    try {
+      const drive = await this.getDrive();
+
+      await drive.files.delete({
+        fileId,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+
+      console.error("Google Drive delete error:", message);
+    }
+  }
+
+  async replaceFile(
+    oldFileId: string | undefined,
+    localPath: string,
+    fileName: string,
+    type?: string,
+  ): Promise<{
+    fileId: string;
+    url: string;
+  }> {
+    if (oldFileId) {
+      await this.deleteFile(oldFileId);
+    }
+
+    return this.uploadFile(localPath, fileName);
+  }
+}
+
+export default new GoogleDriveService();
