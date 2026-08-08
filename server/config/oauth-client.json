@@ -1,0 +1,11 @@
+{
+  "installed": {
+    "client_id": "820475740262-pdgacpc6gm2tll3f1fjf0qa0ffjbt8gi.apps.googleusercontent.com",
+    "project_id": "pure-hydra-501813-c3",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_secret": "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",
+    "redirect_uris": ["http://localhost"]
+  }
+}
